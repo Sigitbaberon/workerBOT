@@ -1,4 +1,4 @@
-const BOT_TOKEN = "6072854501:AAEqz-dgkaeLg0e3RvTloykFcz2ps7qKpIo";
+const BOT_TOKEN = "7341627486:AAFd7TdIjxVdSx3lfkrhgAZpB2VMMU0WjuI";
 const GEMINI_API_KEY = "AIzaSyDHYnj-E0V0h16thBf_-mycv4OnaKRxfgM";
 const GEMINI_MODEL = "gemini-1.5-pro-latest";
 
