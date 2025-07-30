@@ -1,0 +1,6 @@
+name = "ragnet-tools"
+main = "src/worker.ts"
+compatibility_date = "2025-07-30"
+kv_namespaces = [
+  { binding = "KV", id = "KV_ID_RAGNET" }
+]
