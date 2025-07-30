@@ -4,88 +4,103 @@ let taskCounter = 1;
 
 export default {
   async fetch(request, env, ctx) {
-    if (request.method !== "POST") return new Response("Bot aktif 24 jam.");
+    const url = `https://api.telegram.org/bot${env.TELEGRAM_TOKEN}`;
+
+    if (request.method !== "POST") return new Response("Bot aktif!");
 
     const update = await request.json();
-    const msg = update.message;
+
+    const msg = update.message || update.callback_query?.message;
     const chatId = msg.chat.id.toString();
-    const text = msg.text.trim();
+    const text = update.message?.text || update.callback_query?.data;
 
     users[chatId] ??= { coin: 10 };
 
-    let reply = "❓ Perintah tidak dikenali.\nGunakan: /add_task <link> <jenis> <coin>";
-
+    // Handle /start
     if (text === "/start") {
-      reply = `👋 Selamat datang!\n💰 Coin kamu: ${users[chatId].coin}\n\nPerintah:\n/add_task\n/get_task\n/done`;
+      const welcome = `👋 Selamat datang!\n💰 Coin kamu: ${users[chatId].coin}`;
+      await sendWithButtons(url, chatId, welcome);
     }
 
-    else if (text.startsWith("/add_task")) {
-      const parts = text.split(" ");
-      if (parts.length < 4) {
-        reply = "❗ Format: /add_task <link> <jenis> <coin>";
-      } else {
-        const link = parts[1];
-        const type = parts[2];
-        const reward = parseInt(parts[3]);
-
-        if (isNaN(reward) || reward <= 0) {
-          reply = "❗ Coin reward harus angka positif.";
-        } else if (users[chatId].coin < reward) {
-          reply = "❌ Coin tidak cukup.";
-        } else {
-          const task = {
-            id: String(taskCounter++),
-            owner: chatId,
-            link,
-            type,
-            reward,
-            done_by: []
-          };
-          tasks.push(task);
-          users[chatId].coin -= reward;
-          reply = `✅ Tugas berhasil dibuat!\nLink: ${link}\nReward: ${reward} coin\nSisa coin: ${users[chatId].coin}`;
-        }
-      }
+    // Handle button callback
+    else if (text === "add_task") {
+      await sendText(url, chatId, "📝 Kirim tugas dengan format:\n<link> <jenis> <coin>");
+      users[chatId].state = "awaiting_task_input";
     }
 
-    else if (text === "/get_task") {
+    else if (text === "get_task") {
       const task = tasks.find(t => !t.done_by.includes(chatId) && t.owner !== chatId);
       if (!task) {
-        reply = "📭 Belum ada tugas yang tersedia.\nTunggu pengguna lain menambahkan tugas.";
+        await sendText(url, chatId, "📭 Tidak ada tugas saat ini.");
       } else {
-        reply =
+        await sendText(url, chatId,
 `🎯 Tugas Tersedia:
 🔗 Link: ${task.link}
 📌 Jenis: ${task.type}
 💰 Coin: ${task.reward}
 🆔 ID: ${task.id}
 
-✅ Jika sudah dikerjakan, kirim: /done ${task.id}`;
+✅ Jika sudah dikerjakan, tekan tombol "Selesai"`);
+        users[chatId].pendingTask = task.id;
       }
     }
 
-    else if (text.startsWith("/done")) {
-      const parts = text.split(" ");
-      const id = parts[1];
+    else if (text === "done_task") {
+      const id = users[chatId].pendingTask;
       const task = tasks.find(t => t.id === id);
+      if (!task) return await sendText(url, chatId, "❌ Tugas tidak ditemukan.");
+      if (task.done_by.includes(chatId)) return await sendText(url, chatId, "⚠️ Sudah diselesaikan.");
 
-      if (!task) {
-        reply = "❌ Tugas tidak ditemukan.";
-      } else if (task.done_by.includes(chatId)) {
-        reply = "⚠️ Kamu sudah menyelesaikan tugas ini.";
-      } else {
-        task.done_by.push(chatId);
-        users[chatId].coin += task.reward;
-        reply = `🎉 Sukses! Kamu mendapat ${task.reward} coin!\n💰 Total coin: ${users[chatId].coin}`;
-      }
+      task.done_by.push(chatId);
+      users[chatId].coin += task.reward;
+      await sendText(url, chatId, `🎉 Berhasil! Dapat ${task.reward} coin!\n💰 Total coin: ${users[chatId].coin}`);
     }
 
-    await fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chat_id: chatId, text: reply }),
-    });
+    // Handle kiriman manual setelah tekan tambah tugas
+    else if (users[chatId].state === "awaiting_task_input") {
+      const parts = text.split(" ");
+      if (parts.length < 3) {
+        await sendText(url, chatId, "❗ Format salah. Gunakan: <link> <jenis> <coin>");
+      } else {
+        const [link, type, rewardStr] = parts;
+        const reward = parseInt(rewardStr);
+        if (isNaN(reward) || reward <= 0) {
+          await sendText(url, chatId, "❗ Coin reward harus angka positif.");
+        } else if (users[chatId].coin < reward) {
+          await sendText(url, chatId, "❌ Coin tidak cukup.");
+        } else {
+          const task = { id: String(taskCounter++), owner: chatId, link, type, reward, done_by: [] };
+          tasks.push(task);
+          users[chatId].coin -= reward;
+          await sendText(url, chatId, `✅ Tugas ditambahkan!\n🔗 ${link}\n💰 Coin: ${reward}\nSisa: ${users[chatId].coin}`);
+        }
+      }
+      users[chatId].state = null;
+    }
 
     return new Response("OK");
   }
 };
+
+async function sendWithButtons(url, chatId, text) {
+  const buttons = {
+    inline_keyboard: [
+      [{ text: "➕ Tambah Tugas", callback_data: "add_task" }],
+      [{ text: "📋 Ambil Tugas", callback_data: "get_task" }],
+      [{ text: "✅ Selesai Tugas", callback_data: "done_task" }]
+    ]
+  };
+  await fetch(`${url}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text, reply_markup: buttons }),
+  });
+}
+
+async function sendText(url, chatId, text) {
+  await fetch(`${url}/sendMessage`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  });
+}
