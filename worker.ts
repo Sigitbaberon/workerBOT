@@ -1,81 +1,65 @@
-import { handleUpdate, sendMessage, setWebhook, getUserCoins, addCoin } from './bot';
-import { Router } from 'itty-router';
-
-const TELEGRAM_TOKEN = TELEGRAM_TOKEN_ENV; // Diatur lewat Wrangler.toml vars
-const router = Router();
-
-router.post(`/bot${TELEGRAM_TOKEN}`, async (req) => {
-  const update = await req.json();
-  return await handleUpdate(update);
-});
-
-router.get("/", () => new Response("Bot Coin Like aktif!", { status: 200 }));
-
-addEventListener("fetch", (event) => {
-  event.respondWith(router.handle(event.request));
-});
-
-// Bot logic
-const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
-
-export async function handleUpdate(update: any) {
-  const msg = update.message || update.callback_query?.message;
-  const chatId = msg.chat.id;
-  const userId = update.message?.from?.id || update.callback_query?.from?.id;
-
-  if (update.message?.text === "/start") {
-    await sendMessage(chatId, `Selamat datang! Gunakan tombol di bawah untuk mulai.`, [
-      [{ text: "💰 Cek Koin", callback_data: "cek_coin" }],
-      [{ text: "➕ Tambah Koin", callback_data: "tambah_coin" }]
-    ]);
-    return new Response("OK");
-  }
-
-  if (update.callback_query) {
-    const data = update.callback_query.data;
-    if (data === "cek_coin") {
-      const coins = await getUserCoins(userId);
-      await sendMessage(chatId, `🔎 Kamu punya ${coins} koin.`);
-    } else if (data === "tambah_coin") {
-      const newCoins = await addCoin(userId, 1);
-      await sendMessage(chatId, `✅ Koin berhasil ditambahkan! Total: ${newCoins} koin.`);
+export default {
+  async fetch(req: Request, env: any): Promise<Response> {
+    const url = new URL(req.url)
+    if (req.method !== 'POST' || !url.pathname.startsWith("/webhook")) {
+      return new Response("Only Telegram Webhook POST supported", { status: 400 });
     }
-    return new Response("OK");
+
+    const body = await req.json()
+    const msg = body.message || body.callback_query?.message
+    const chat_id = msg?.chat?.id
+    const user_id = body.message?.from?.id || body.callback_query?.from?.id
+    const username = body.message?.from?.username || body.callback_query?.from?.username
+
+    // Default response if nothing matched
+    const reply = async (text: string, options = {}) =>
+      fetch(`https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`, {
+        method: 'POST',
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chat_id,
+          text,
+          parse_mode: "Markdown",
+          ...options,
+        }),
+      })
+
+    // Handle start
+    if (body.message?.text === "/start") {
+      const userKey = `user:${user_id}`
+      const exists = await env.DB.get(userKey)
+      if (!exists) await env.DB.put(userKey, JSON.stringify({ coins: 10, username }))
+      return reply(`Selamat datang, @${username || "anon"}! 🎉\n\nKamu mendapat 10 coin pertama!\nGunakan tombol-tombol di bawah ini:`, {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "💰 Cek Coin", callback_data: "cek_coin" }],
+            [{ text: "📢 Info", callback_data: "info" }],
+            [{ text: "👥 Grup Telegram", url: "https://t.me/yourgroup" }]
+          ]
+        }
+      })
+    }
+
+    // Handle tombol
+    if (body.callback_query) {
+      const data = body.callback_query.data
+      const userKey = `user:${user_id}`
+      const userRaw = await env.DB.get(userKey)
+      const userData = userRaw ? JSON.parse(userRaw) : { coins: 0 }
+
+      if (data === "cek_coin") {
+        return reply(`Kamu punya *${userData.coins}* coin 💰`, {
+          reply_to_message_id: msg.message_id
+        })
+      }
+
+      if (data === "info") {
+        return reply(`📢 *Tentang Bot Ini*\n\n- Dapatkan coin dengan promosi\n- Gunakan coin untuk akses premium\n\nKontak: @YourAdmin`, {
+          reply_to_message_id: msg.message_id
+        })
+      }
+    }
+
+    return new Response("OK")
   }
-
-  return new Response("Ignored", { status: 200 });
-}
-
-export async function sendMessage(chatId: number, text: string, buttons: any = null) {
-  const body: any = {
-    chat_id: chatId,
-    text: text,
-    parse_mode: "Markdown"
-  };
-
-  if (buttons) {
-    body.reply_markup = {
-      inline_keyboard: buttons
-    };
-  }
-
-  await fetch(`${TELEGRAM_API}/sendMessage`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  });
-}
-
-export async function getUserCoins(userId: number) {
-  const key = `coin_${userId}`;
-  const value = await COIN_KV.get(key);
-  return parseInt(value || "0");
-}
-
-export async function addCoin(userId: number, amount: number) {
-  const key = `coin_${userId}`;
-  const current = await getUserCoins(userId);
-  const total = current + amount;
-  await COIN_KV.put(key, total.toString());
-  return total;
 }
