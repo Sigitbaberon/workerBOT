@@ -1,0 +1,6 @@
+name = "telegram-bot-worker"
+main = "src/index.ts"
+compatibility_date = "2025-07-30"
+
+[vars]
+BOT_TOKEN = "7341627486:AAFd7TdIjxVdSx3lfkrhgAZpB2VMMU0WjuI"
