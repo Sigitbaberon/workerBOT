@@ -1,26 +1,21 @@
 export default {
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
+  async fetch(request, env, ctx) {
+    const body = await request.json();
 
-    if (request.method === "POST" && url.pathname === "/webhook") {
-      const body = await request.json();
-      const chatId = body.message?.chat.id;
-      const text = body.message?.text;
+    const chatId = body.message.chat.id;
+    const text = body.message.text;
 
-      const reply = {
-        chat_id: chatId,
-        text: `Halo! Kamu mengirim: ${text}`,
-      };
+    const reply = {
+      chat_id: chatId,
+      text: `Kamu bilang: ${text}`
+    };
 
-      await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(reply),
-      });
+    await fetch(`https://api.telegram.org/bot7341627486:AAFd7TdIjxVdSx3lfkrhgAZpB2VMMU0WjuI/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(reply)
+    });
 
-      return new Response("OK", { status: 200 });
-    }
-
-    return new Response("Not found", { status: 404 });
-  },
-};
+    return new Response('OK');
+  }
+}
