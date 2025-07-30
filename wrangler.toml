@@ -1,5 +1,5 @@
 name = "coin-likebot"
-main = "worker.js"
+main = "worker.ts"
 compatibility_date = "2025-07-30"
 
 [vars]
