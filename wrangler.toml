@@ -1,6 +1,8 @@
-name = "telegram-bot-worker"
-main = "src/index.ts"
+name = "gemini-telegram-worker"
+main = "worker.ts"
 compatibility_date = "2025-07-30"
 
 [vars]
 BOT_TOKEN = "7341627486:AAFd7TdIjxVdSx3lfkrhgAZpB2VMMU0WjuI"
+GEMINI_API_KEY = "AIzaSyDHYnj-E0V0h16thBf_-mycv4OnaKRxfgM"
+GEMINI_MODEL = "gemini-1.5-pro-latest"
