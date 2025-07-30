@@ -4,3 +4,7 @@ compatibility_date = "2025-07-30"
 
 [vars]
 TELEGRAM_TOKEN = "8197335440:AAEY93jyo1P94iJ0rx2xPNb20c6H60BWjvg"
+
+[[kv_namespaces]]
+binding = "COIN_KV"
+id = "236d68b5c6964ee79fc7f0afbda2340e"
