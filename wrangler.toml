@@ -1,4 +1,4 @@
-name = "coin-likebot"
+name = "workerbot"
 main = "worker.ts"
 compatibility_date = "2025-07-30"
 
