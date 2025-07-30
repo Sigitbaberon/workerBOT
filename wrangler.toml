@@ -1,8 +1,6 @@
-name = "gemini-telegram-worker"
-main = "worker.ts"
+name = "coin-likebot"
+main = "worker.js"
 compatibility_date = "2025-07-30"
 
 [vars]
-BOT_TOKEN = "7341627486:AAFd7TdIjxVdSx3lfkrhgAZpB2VMMU0WjuI"
-GEMINI_API_KEY = "AIzaSyDHYnj-E0V0h16thBf_-mycv4OnaKRxfgM"
-GEMINI_MODEL = "gemini-1.5-pro-latest"
+TELEGRAM_TOKEN = "8197335440:AAEY93jyo1P94iJ0rx2xPNb20c6H60BWjvg"
