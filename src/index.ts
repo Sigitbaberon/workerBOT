@@ -1,55 +1,50 @@
-import express from 'express';
-import bodyParser from 'body-parser';
-import fetch from 'node-fetch'; // Gunakan node-fetch v2
+const BOT_TOKEN = "6072854501:AAEqz-dgkaeLg0e3RvTloykFcz2ps7qKpIo";
+const GEMINI_API_KEY = "AIzaSyDHYnj-E0V0h16thBf_-mycv4OnaKRxfgM";
+const GEMINI_MODEL = "gemini-1.5-pro-latest";
 
-const app = express();
-app.use(bodyParser.json());
-
-const TELEGRAM_TOKEN = '...ISI_TOKEN_BOT_KAMU...';
-const GEMINI_API_KEY = 'AIzaSyDHYnj-E0V0h16thBf_-mycv4OnaKRxfgM';
-const GEMINI_MODEL = 'gemini-2.5-pro';
-
-const telegramAPI = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
-
-app.post('/webhook', async (req, res) => {
-  const msg = req.body.message;
-  const chatId = msg.chat.id;
-  const userText = msg.text;
-
-  // Panggil API Gemini
-  const geminiResponse = await fetch(
-    `https://generativelanguage.googleapis.com/v1/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            parts: [{ text: userText }]
-          }
-        ]
-      })
+export default {
+  async fetch(req: Request): Promise<Response> {
+    if (req.method !== "POST") {
+      return new Response("Only POST requests are accepted", { status: 405 });
     }
-  );
 
-  const geminiData = await geminiResponse.json();
-  const reply =
-    geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || 'Maaf, tidak ada respon.';
+    let payload;
+    try {
+      payload = await req.json();
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
 
-  // Kirim balasan ke Telegram
-  await fetch(`${telegramAPI}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      chat_id: chatId,
-      text: reply
-    })
-  });
+    const chatId = payload?.message?.chat?.id;
+    const userText = payload?.message?.text;
 
-  res.sendStatus(200);
-});
+    if (!chatId || !userText) {
+      return new Response("Missing chat ID or text", { status: 400 });
+    }
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Bot jalan di port ${PORT}`);
-});
+    // Kirim pertanyaan ke Gemini
+    const geminiResp = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: userText }] }]
+        })
+      }
+    );
+
+    const geminiData = await geminiResp.json();
+    const reply =
+      geminiData?.candidates?.[0]?.content?.parts?.[0]?.text || "❌ Gemini tidak membalas.";
+
+    // Kirim balasan ke Telegram
+    await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ chat_id: chatId, text: reply })
+    });
+
+    return new Response("OK");
+  }
+};
