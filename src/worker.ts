@@ -1,121 +1,95 @@
-import { Router } from 'itty-router'
+import { Router } from 'itty-router';
 
-const router = Router()
+const router = Router();
 
-// Waktu tunggu tugas (dalam detik)
-const WAIT_SECONDS = 10
-
-// Helper untuk ambil data JSON dari KV
 async function loadJSON(env, key) {
-  const val = await env.STORAGE.get(key)
-  return val ? JSON.parse(val) : key.startsWith('task-') ? {} : []
+  const val = await env.STORAGE.get(key);
+  return val ? JSON.parse(val) : key === 'tasks.json' ? [] : {};
 }
 
-// Helper untuk simpan data JSON ke KV
 async function saveJSON(env, key, data) {
-  await env.STORAGE.put(key, JSON.stringify(data))
+  await env.STORAGE.put(key, JSON.stringify(data));
 }
 
-// ⛳ Webhook Handler
-router.post("/webhook", async (request, env) => {
-  const update = await request.json()
-  const msg = update.message
-  if (!msg || !msg.text) return new Response("OK")
+router.post('/webhook', async (request, env) => {
+  const body = await request.json();
+  const msg = body.message;
+  const userId = msg.from.id.toString();
+  const text = msg.text || '';
 
-  const chatId = msg.chat.id
-  const text = msg.text.trim()
-  const userId = String(chatId)
+  let users = await loadJSON(env, 'users.json');
+  let tasks = await loadJSON(env, 'tasks.json');
 
-  // Load data user
-  let userStates = await loadJSON(env, 'user_states.json')
-  let user = userStates.find(u => u.id === userId)
-
-  if (!user) {
-    user = { id: userId, koin: 0, state: 'idle' }
-    userStates.push(user)
-    await saveJSON(env, 'user_states.json', userStates)
+  if (!users[userId]) {
+    users[userId] = { username: msg.from.username || '', coin: 10 };
+    await saveJSON(env, 'users.json', users);
   }
 
-  // Handle perintah
-  if (text === '/start') {
-    await sendMessage(env, chatId, `Selamat datang! Kamu punya ${user.koin} koin.`)
-    return new Response("OK")
-  }
+  let reply = '';
 
-  if (text === '/koin') {
-    await sendMessage(env, chatId, `Saldo kamu: ${user.koin} koin`)
-    return new Response("OK")
-  }
-
-  if (text === '/tugas') {
-    // Cek apakah user sedang menunggu tugas
-    if (user.state === 'waiting') {
-      await sendMessage(env, chatId, `Kamu sedang menunggu tugas...`)
-      return new Response("OK")
+  if (text.startsWith('/buat_tugas')) {
+    const [cmd, jenis, url, rewardStr] = text.split(' ');
+    const reward = parseInt(rewardStr);
+    if (!url || isNaN(reward)) {
+      reply = 'Format salah. Contoh: /buat_tugas like https://fb.com/post 2';
+    } else if (users[userId].coin < reward) {
+      reply = `Coin kamu tidak cukup. Coin kamu: ${users[userId].coin}`;
+    } else {
+      const id = 'task-' + Date.now();
+      tasks.push({
+        id,
+        type: jenis,
+        target: url,
+        reward,
+        created_by: userId,
+        done_by: []
+      });
+      users[userId].coin -= reward;
+      await saveJSON(env, 'tasks.json', tasks);
+      await saveJSON(env, 'users.json', users);
+      reply = `Tugas ${jenis} dibuat!\nID: ${id}\nLink: ${url}\nReward: ${reward} coin`;
     }
 
-    // Buat tugas baru
-    user.state = 'waiting'
-    await saveJSON(env, 'user_states.json', userStates)
+  } else if (text.startsWith('/daftar_tugas')) {
+    const available = tasks.filter(
+      t => !t.done_by.includes(userId) && t.created_by !== userId
+    );
+    reply = available.length === 0 ? 'Tidak ada tugas.'
+      : available.map(t => `ðŸ†” ${t.id}\nðŸ”— ${t.target}\nðŸ’° ${t.reward} coin`).join('\n\n');
 
-    // Simulasikan penundaan tugas (nanti diganti real logic)
-    setTimeout(async () => {
-      const tugas = {
-        id: `tugas-${Date.now()}`,
-        userId: userId,
-        deskripsi: "Tugas klik tombol, nanti kamu dapat 1 koin",
-        waktu: new Date().toISOString()
-      }
-
-      await env.STORAGE.put(`task-${userId}`, JSON.stringify(tugas))
-
-      // Kirim tugas ke user
-      await sendMessage(env, chatId, `Tugas baru:\n${tugas.deskripsi}`)
-
-      // Reset status
-      user.state = 'idle'
-      await saveJSON(env, 'user_states.json', userStates)
-    }, WAIT_SECONDS * 1000)
-
-    await sendMessage(env, chatId, `Sedang mencari tugas... tunggu ${WAIT_SECONDS} detik.`)
-    return new Response("OK")
-  }
-
-  if (text === '/ambil') {
-    const tugas = await loadJSON(env, `task-${userId}`)
-
-    if (!tugas.id) {
-      await sendMessage(env, chatId, `Belum ada tugas untuk kamu.`)
-      return new Response("OK")
+  } else if (text.startsWith('/kerjakan')) {
+    const [_, taskId] = text.split(' ');
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) reply = 'Tugas tidak ditemukan.';
+    else if (task.done_by.includes(userId)) reply = 'Sudah dikerjakan.';
+    else {
+      task.done_by.push(userId);
+      users[userId].coin += task.reward;
+      await saveJSON(env, 'tasks.json', tasks);
+      await saveJSON(env, 'users.json', users);
+      reply = `Berhasil kerjakan ${task.id}.\n+${task.reward} coin.`;
     }
 
-    // Tambah koin
-    user.koin += 1
-    await env.STORAGE.delete(`task-${userId}`)
-    await saveJSON(env, 'user_states.json', userStates)
+  } else if (text === '/cek_coin') {
+    reply = `Coin kamu: ${users[userId].coin}`;
 
-    await sendMessage(env, chatId, `Tugas selesai! Kamu dapat 1 koin.\nTotal koin: ${user.koin}`)
-    return new Response("OK")
+  } else {
+    reply = `Perintah tidak dikenali.
+Gunakan:
+/buat_tugas like https://url 1
+/daftar_tugas
+/kerjakan task-id
+/cek_coin`;
   }
 
-  // Tidak dikenal
-  await sendMessage(env, chatId, `Perintah tidak dikenali.`)
-  return new Response("OK")
-})
-
-// Fungsi kirim pesan
-async function sendMessage(env, chatId, text) {
-  const url = `https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`
-  await fetch(url, {
+  await fetch(`https://api.telegram.org/bot${env.BOT_TOKEN}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text })
-  })
-}
+    body: JSON.stringify({ chat_id: userId, text: reply })
+  });
 
-// ⛳ Default router fallback
-router.all("*", () => new Response("404 Not Found", { status: 404 }))
+  return new Response('OK');
+});
 
-export default {
-  fetch: (req, env, ctx) => router.handle(req, env, ctx),
-      }
+router.all('*', () => new Response('Not Found', { status: 404 }));
+export default { fetch: router.handle };
