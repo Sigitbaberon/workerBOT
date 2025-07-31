@@ -1,257 +1,28 @@
-import { Router } from 'itty-router';
+import { Router } from 'itty-router'; import { Telegram } from 'grammy'; import { kv } from '@vercel/kv';
 
-const router = Router();
-const WAIT_SECONDS = 10;
+const router = Router(); const bot = new Telegram(BOT_TOKEN);
 
-async function loadJSON(env, key) {
-  const val = await env.STORAGE.get(key);
-  return val ? JSON.parse(val) : key.includes('task-') ? {} : key === 'tasks.json' ? [] : {};
-}
+const taskTypes = { like: { label: '👍 Like', cost: 1 }, share: { label: '🔄 Share', cost: 2 }, view_video: { label: '▶️ Tonton Video', cost: 3 }, follow: { label: '➕ Follow', cost: 2 }, visit: { label: '🔗 Kunjungi Link', cost: 1 }, };
 
-async function saveJSON(env, key, data) {
-  await env.STORAGE.put(key, JSON.stringify(data));
-}
+router.post('/webhook', async (req) => { const update = await req.json(); const msg = update.message || update.callback_query?.message; const from = update.message?.from || update.callback_query?.from; const userId = from.id.toString(); const text = update.message?.text || update.callback_query?.data;
 
-async function sendTelegram(token, method, payload) {
-  return fetch(`https://api.telegram.org/bot${token}/${method}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-}
+const userKey = create-task-${userId}; const state = await kv.get(userKey) || {};
 
-async function showTyping(token, chat_id) {
-  await sendTelegram(token, 'sendChatAction', {
-    chat_id,
-    action: 'typing',
-  });
-}
+// Start command if (text === '/start') { await bot.sendMessage(userId, 'Selamat datang! Tekan tombol di bawah untuk membuat tugas.', { reply_markup: { inline_keyboard: [[{ text: '➕ Buat Tugas', callback_data: 'buat_tugas' }]], }, }); }
 
-function isValidURL(url) {
-  try {
-    const u = new URL(url);
-    return ['http:', 'https:'].includes(u.protocol);
-  } catch {
-    return false;
-  }
-}
+// Create task - step 1: choose type else if (text === 'buat_tugas') { await kv.set(userKey, { step: 'choose_type' }); await bot.sendMessage(userId, 'Pilih jenis tugas:', { reply_markup: { inline_keyboard: Object.keys(taskTypes).map((type) => [{ text: taskTypes[type].label, callback_data: tipe_${type}, }]), }, }); }
 
-function mainMenu() {
-  return {
-    inline_keyboard: [
-      [{ text: '📋 Lihat Tugas', callback_data: 'daftar_tugas' }],
-      [{ text: '➕ Buat Tugas', callback_data: 'buat_tugas' }],
-      [{ text: '💰 Cek Coin', callback_data: 'cek_coin' }],
-      [{ text: 'ℹ️ Bantuan', callback_data: 'bantuan' }],
-    ],
-  };
-}
+// Create task - step 2: insert URL else if (text.startsWith('tipe_')) { const taskType = text.replace('tipe_', ''); await kv.set(userKey, { step: 'input_url', type: taskType }); await bot.sendMessage(userId, Kirimkan URL target untuk tugas ${taskTypes[taskType].label}); }
 
-router.post('/webhook', async (request, env) => {
-  let body;
-  try {
-    body = await request.json();
-  } catch {
-    return new Response('Invalid JSON', { status: 400 });
-  }
+// Create task - step 3: insert jumlah else if (state.step === 'input_url' && text.startsWith('http')) { state.url = text; state.step = 'jumlah'; await kv.set(userKey, state); await bot.sendMessage(userId, 'Berapa jumlah tugas yang ingin dibuat?', { reply_markup: { inline_keyboard: [ [ { text: '5', callback_data: 'jumlah_5' }, { text: '10', callback_data: 'jumlah_10' }, { text: '20', callback_data: 'jumlah_20' }, ], [{ text: 'Custom', callback_data: 'jumlah_custom' }], ], }, }); }
 
-  const isCallback = !!body.callback_query;
-  const msg = isCallback ? body.callback_query.message : body.message;
-  const userId = (isCallback ? body.callback_query.from.id : msg.from.id).toString();
-  const text = isCallback ? body.callback_query.data : msg.text?.trim();
+// Jumlah bawaan else if (text.startsWith('jumlah_')) { const jumlah = parseInt(text.split('_')[1]); state.jumlah = jumlah; state.step = 'konfirmasi'; await kv.set(userKey, state); const biaya = jumlah * taskTypes[state.type].cost; await bot.sendMessage(userId, Tugas: ${taskTypes[state.type].label}\nLink: ${state.url}\nJumlah: ${jumlah}\nTotal coin: ${biaya}\n Klik tombol di bawah untuk konfirmasi., { reply_markup: { inline_keyboard: [[{ text: '✅ Buat Sekarang', callback_data: 'buat_konfirmasi' }]], }, }); }
 
-  if (!text) return new Response('No message text');
+// Jumlah custom else if (text === 'jumlah_custom') { state.step = 'jumlah_custom'; await kv.set(userKey, state); await bot.sendMessage(userId, 'Masukkan jumlah tugas yang kamu inginkan (angka saja):'); } else if (state.step === 'jumlah_custom' && !isNaN(parseInt(text))) { const jumlah = parseInt(text); state.jumlah = jumlah; state.step = 'konfirmasi'; await kv.set(userKey, state); const biaya = jumlah * taskTypes[state.type].cost; await bot.sendMessage(userId, Tugas: ${taskTypes[state.type].label}\nLink: ${state.url}\nJumlah: ${jumlah}\nTotal coin: ${biaya}\n Klik tombol di bawah untuk konfirmasi., { reply_markup: { inline_keyboard: [[{ text: '✅ Buat Sekarang', callback_data: 'buat_konfirmasi' }]], }, }); }
 
-  let users = await loadJSON(env, 'users.json');
-  let tasks = await loadJSON(env, 'tasks.json');
+// Konfirmasi pembuatan tugas else if (text === 'buat_konfirmasi') { // Di sini logika cek saldo coin & simpan ke DB tugas await bot.sendMessage(userId, '✅ Tugas berhasil dibuat dan akan segera dikerjakan pengguna lainnya.'); await kv.del(userKey); // Hapus state }
 
-  if (!users[userId]) {
-    users[userId] = { username: msg.from?.username || '', coin: 10 };
-    await saveJSON(env, 'users.json', users);
-  }
+return new Response('OK'); });
 
-  // ==== /START ====
-  if (text === '/start') {
-    await showTyping(env.BOT_TOKEN, userId);
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: `👋 Selamat datang *${msg.from.first_name}*!\n\nGunakan menu di bawah untuk memulai:`,
-      parse_mode: 'Markdown',
-      reply_markup: mainMenu(),
-    });
-    return new Response('OK');
-  }
+export default router;
 
-  // ==== CEK COIN ====
-  if (text === 'cek_coin') {
-    await showTyping(env.BOT_TOKEN, userId);
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: `💰 Coin kamu saat ini: *${users[userId].coin}*`,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🔄 Kembali ke Menu', callback_data: '/start' }]] },
-    });
-
-  // ==== LIHAT TUGAS ====
-  } else if (text === 'daftar_tugas') {
-    await showTyping(env.BOT_TOKEN, userId);
-    const available = tasks.filter(t => !t.done_by.includes(userId) && t.created_by !== userId);
-    if (available.length === 0) {
-      await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: '📭 Tidak ada tugas yang tersedia untuk kamu saat ini.',
-        reply_markup: { inline_keyboard: [[{ text: '🔄 Kembali ke Menu', callback_data: '/start' }]] },
-      });
-    } else {
-      for (const task of available) {
-        await saveJSON(env, `task-${task.id}-${userId}`, { visited: Date.now() });
-        const emoji = task.type === 'like' ? '👍' : '🔗';
-        await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-          chat_id: userId,
-          text: `📌 *Tugas Baru*\n\n🆔 ID: \`${task.id}\`\n${emoji} Jenis: *${task.type.toUpperCase()}*\n🎯 Link: [Klik Disini](${task.target})\n💰 Reward: *${task.reward} coin*`,
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [
-              [{ text: `${emoji} Buka Link`, url: task.target }],
-              [{ text: '✅ Saya sudah kunjungi', callback_data: `klaim_${task.id}` }],
-              [{ text: '🔄 Kembali ke Menu', callback_data: '/start' }],
-            ],
-          },
-        });
-      }
-    }
-
-  // ==== KLAIM TUGAS ====
-  } else if (text.startsWith('klaim_')) {
-    const taskId = text.split('_')[1];
-    const task = tasks.find(t => t.id === taskId);
-    const visitKey = `task-${taskId}-${userId}`;
-    const visitData = await loadJSON(env, visitKey);
-    const now = Date.now();
-
-    await showTyping(env.BOT_TOKEN, userId);
-
-    if (!task) {
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: '❌ Tugas tidak ditemukan.',
-      });
-    }
-
-    if (task.done_by.includes(userId)) {
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: '⚠️ Kamu sudah klaim tugas ini sebelumnya.',
-      });
-    }
-
-    if (!visitData.visited || now - visitData.visited < WAIT_SECONDS * 1000) {
-      const sisa = Math.ceil((WAIT_SECONDS * 1000 - (now - (visitData.visited || 0))) / 1000);
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: `⏳ Tunggu *${sisa} detik* lagi sebelum klaim.`,
-        parse_mode: 'Markdown',
-      });
-    }
-
-    task.done_by.push(userId);
-    users[userId].coin += task.reward;
-    await saveJSON(env, 'tasks.json', tasks);
-    await saveJSON(env, 'users.json', users);
-
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: `🎉 *Klaim berhasil!*\nKamu mendapatkan *${task.reward} coin*.`,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🔄 Kembali ke Menu', callback_data: '/start' }]] },
-    });
-
-  // ==== BANTUAN ====
-  } else if (text === 'bantuan') {
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: `🆘 *Bantuan Bot*\n\n📌 Gunakan menu utama untuk interaksi.\n\n➕ *Buat Tugas*: Klik tombol ➕ Buat Tugas\nGunakan format:\n\`/buat_tugas like https://link 5\`\n\n🎯 Jenis tugas: \`like\` atau \`visit\`\n💰 Coin akan dikurangi sesuai reward tugas.\n`,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🔄 Kembali ke Menu', callback_data: '/start' }]] },
-    });
-
-  // ==== BUAT TUGAS VIA PERINTAH ====
-  } else if (text.startsWith('/buat_tugas')) {
-    const parts = text.split(' ');
-    if (parts.length < 4) {
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: '❗ Format salah.\nContoh:\n`/buat_tugas like https://link 5`',
-        parse_mode: 'Markdown',
-      });
-    }
-
-    const [_, jenis, url, rewardStr] = parts;
-    const reward = parseInt(rewardStr);
-
-    if (!['like', 'visit'].includes(jenis)) {
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: '❗ Jenis tugas tidak valid. Gunakan `like` atau `visit`.',
-        parse_mode: 'Markdown',
-      });
-    }
-
-    if (!isValidURL(url)) {
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: '❗ URL tidak valid. Harus diawali http:// atau https://',
-      });
-    }
-
-    if (isNaN(reward) || reward < 1) {
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: '❗ Reward harus berupa angka positif.',
-      });
-    }
-
-    if (users[userId].coin < reward) {
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: `❌ Coin kamu tidak cukup. Coin tersedia: *${users[userId].coin}*`,
-        parse_mode: 'Markdown',
-      });
-    }
-
-    const id = 'task-' + Date.now();
-    tasks.push({ id, type: jenis, target: url, reward, created_by: userId, done_by: [] });
-    users[userId].coin -= reward;
-
-    await saveJSON(env, 'tasks.json', tasks);
-    await saveJSON(env, 'users.json', users);
-
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: `✅ *Tugas berhasil dibuat!*\n\n🆔 ID: \`${id}\`\n🎯 Link: ${url}\n💰 Reward: ${reward} coin`,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🔄 Kembali ke Menu', callback_data: '/start' }]] },
-    });
-
-  // ==== TOMBOL BUAT TUGAS TANPA TEKS ====
-  } else if (text === 'buat_tugas') {
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: `🛠️ *Buat Tugas Manual*\n\nGunakan perintah seperti:\n\`/buat_tugas like https://linkmu 5\`\n\nJenis: \`like\` atau \`visit\`\nReward: coin minimal 1`,
-      parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '🔄 Kembali ke Menu', callback_data: '/start' }]] },
-    });
-
-  } else {
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: '🤖 Perintah tidak dikenali. Gunakan tombol /start atau klik menu.',
-    });
-  }
-
-  return new Response('OK');
-});
-
-router.all('*', () => new Response('Not Found', { status: 404 }));
-
-export default { fetch: router.handle };
