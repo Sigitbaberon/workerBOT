@@ -1,159 +1,100 @@
-addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request))
-})
+addEventListener("fetch", event => {
+  event.respondWith(handleRequest(event.request));
+});
 
-const taskTypes = {
-  like: { cost: 2, reward: 1 },
-  follow: { cost: 4, reward: 2 },
-  comment: { cost: 6, reward: 3 },
-  share: { cost: 5, reward: 2.5 }
-}
+const users = {};
+const tasks = [];
+const taskHistory = [];
+const dailyClaim = {};
 
 async function handleRequest(request) {
-  if (request.method !== "POST") return new Response("OK")
-  const update = await request.json()
+  const url = new URL(request.url);
+  const params = url.searchParams;
+  const userId = params.get("user_id");
+  const action = params.get("action");
 
-  if (update.message) {
-    const msg = update.message
-    const chatId = msg.chat.id
-    const userId = String(chatId)
-    const text = msg.text?.toLowerCase()?.trim() || ""
-
-    let user = await USERS.get(userId, { type: 'json' }) || { coins: 10, tasks: [] }
-
-    // Menu /start
-    if (text === "/start") {
-      await USERS.put(userId, JSON.stringify(user))
-      return sendMessage(chatId,
-        `👋 Selamat datang di *Ragnet Tools*!\n\n🔁 Sistem tugas like/follow/share Facebook\n💰 Dapatkan koin dari menyelesaikan tugas.\n\nPilih menu:`,
-        mainKeyboard())
-    }
-
-    // Kirim link Facebook
-    if (text.startsWith("http")) {
-      if (!/^https?:\/\/(www\.)?facebook\.com/.test(text)) {
-        return sendMessage(chatId, `⛔ Link harus dari Facebook.`)
-      }
-
-      user.lastLink = text
-      await USERS.put(userId, JSON.stringify(user))
-      return sendMessage(chatId, `📌 Link tersimpan.\nPilih jenis tugas:`, typeKeyboard())
-    }
-
-    return sendMessage(chatId, `🤖 Silakan gunakan tombol di bawah.`, mainKeyboard())
+  if (!users[userId]) {
+    users[userId] = { koin: 100, selesai: 0, level: 1, referral: [], rank: 0 };
   }
 
-  if (update.callback_query) {
-    const data = update.callback_query.data
-    const chatId = update.callback_query.message.chat.id
-    const userId = String(chatId)
-    let user = await USERS.get(userId, { type: 'json' }) || { coins: 10, tasks: [] }
-
-    if (data === "profile") {
-      return sendMessage(chatId,
-        `🧑‍💼 ID: ${chatId}\n💰 Koin: ${user.coins}\n📝 Total Tugas: ${user.tasks.length}`,
-        mainKeyboard())
-    }
-
-    if (data === "buat") {
-      return sendMessage(chatId, `🔗 Kirimkan link Facebook kamu dulu.\nSetelah itu pilih jenis tugas.`)
-    }
-
-    if (data === "ambil") {
-      const users = await USERS.list()
-      let tugas = []
-
-      for (const key of users.keys) {
-        const u = await USERS.get(key.name, { type: "json" })
-        if (u?.tasks?.length > 0) {
-          tugas.push(...u.tasks.map(t =>
-            `✅ ${t.type.toUpperCase()} - [Klik Tugas](${t.url}) → 🎁 +${t.reward} koin`
-          ))
-        }
-      }
-
-      return sendMessage(chatId,
-        tugas.length ? tugas.join('\n\n') : '📭 Belum ada tugas.',
-        mainKeyboard(), true)
-    }
-
-    if (data.startsWith("task:")) {
-      const type = data.split(":")[1]
-      const setting = taskTypes[type]
-      const link = user.lastLink
-
-      if (!setting) return sendMessage(chatId, "⛔ Jenis tugas tidak dikenal.")
-      if (!link) return sendMessage(chatId, "📎 Kirimkan link Facebook dulu.")
-      if (user.coins < setting.cost) {
-        return sendMessage(chatId,
-          `❌ Koin kamu tidak cukup.\n💰 Perlu ${setting.cost}, kamu punya ${user.coins}`)
-      }
-
-      // Cegah duplikat
-      if (user.tasks.find(t => t.url === link && t.type === type)) {
-        return sendMessage(chatId, "⚠️ Tugas ini sudah pernah kamu buat.")
-      }
-
-      // Maks 10 tugas
-      if (user.tasks.length >= 10) {
-        return sendMessage(chatId, "🚫 Maksimal 10 tugas aktif per pengguna.")
-      }
-
-      // Simpan tugas
-      user.tasks.push({
-        id: crypto.randomUUID(),
-        type,
-        url: link,
-        reward: setting.reward
-      })
-      user.coins -= setting.cost
-      delete user.lastLink
-      await USERS.put(userId, JSON.stringify(user))
-
-      return sendMessage(chatId,
-        `✅ Tugas berhasil dibuat!\n🔗 ${type.toUpperCase()} → ${link}\n💸 -${setting.cost} koin`,
-        mainKeyboard())
+  if (action === "add_task") {
+    const taskLink = params.get("link");
+    const koinDipotong = parseInt(params.get("koin")) || 10;
+    if (users[userId].koin >= koinDipotong) {
+      tasks.push({ id: tasks.length, pemilik: userId, link: taskLink, koin: koinDipotong });
+      users[userId].koin -= koinDipotong;
+      return new Response("Tugas berhasil ditambahkan");
+    } else {
+      return new Response("Koin tidak cukup");
     }
   }
 
-  return new Response("OK")
+  if (action === "kerjakan") {
+    const taskId = parseInt(params.get("id"));
+    const task = tasks.find(t => t.id === taskId && t.pemilik !== userId);
+    if (task) {
+      users[userId].koin += task.koin;
+      users[userId].selesai += 1;
+      users[task.pemilik].koin += 1; // reward pemilik karena tugas selesai
+      taskHistory.push({ taskId, oleh: userId, waktu: Date.now() });
+      tasks.splice(tasks.indexOf(task), 1);
+      return new Response("Tugas selesai, koin bertambah");
+    }
+    return new Response("Tugas tidak ditemukan atau milik sendiri");
+  }
+
+  if (action === "statistik") {
+    const u = users[userId];
+    return new Response(`📊 Statistik Anda:\n\nKoin: ${u.koin}\nTugas Diselesaikan: ${u.selesai}\nLevel: ${u.level}`);
+  }
+
+  if (action === "leaderboard") {
+    const ranking = Object.entries(users)
+      .sort(([, a], [, b]) => b.koin - a.koin)
+      .slice(0, 10)
+      .map(([id, u], i) => `${i + 1}. ${id} - ${u.koin} koin`)
+      .join("\n");
+    return new Response(`🏆 Peringkat:\n\n${ranking}`);
+  }
+
+  if (action === "daily") {
+    const now = Date.now();
+    const last = dailyClaim[userId] || 0;
+    if (now - last >= 86400000) {
+      users[userId].koin += 20;
+      dailyClaim[userId] = now;
+      return new Response("🎁 Bonus harian klaim berhasil +20 koin");
+    }
+    return new Response("Sudah klaim hari ini, coba besok");
+  }
+
+  if (action === "referral") {
+    const ref = params.get("ref");
+    if (ref && ref !== userId && users[ref]) {
+      if (!users[ref].referral.includes(userId)) {
+        users[ref].referral.push(userId);
+        users[ref].koin += 15;
+        return new Response("Referral berhasil, user yang direferensi mendapat bonus");
+      }
+    }
+    return new Response("Referral gagal");
+  }
+
+  // Daftar tombol utama
+  const menu = `
+Selamat datang 👋
+
+💰 Koin Anda: ${users[userId].koin}
+🛠 Tugas tersedia: ${tasks.length}
+
+🔘 Menu:
+- Tambah Tugas: /?action=add_task&user_id=${userId}&link=LINK&koin=10
+- Kerjakan Tugas: /?action=kerjakan&user_id=${userId}&id=TASKID
+- Statistik: /?action=statistik&user_id=${userId}
+- Ranking: /?action=leaderboard&user_id=${userId}
+- Bonus Harian: /?action=daily&user_id=${userId}
+- Referral: /?action=referral&user_id=${userId}&ref=ID_REF
+`;
+
+  return new Response(menu);
 }
-
-// ======================== UI
-function mainKeyboard() {
-  return {
-    inline_keyboard: [
-      [{ text: "👤 Profil", callback_data: "profile" }],
-      [{ text: "📥 Buat Tugas", callback_data: "buat" }],
-      [{ text: "📋 Ambil Tugas", callback_data: "ambil" }]
-    ]
-  }
-}
-
-function typeKeyboard() {
-  return {
-    inline_keyboard: [
-      [{ text: "👍 Like", callback_data: "task:like" }],
-      [{ text: "➕ Follow", callback_data: "task:follow" }],
-      [{ text: "💬 Komentar", callback_data: "task:comment" }],
-      [{ text: "🔁 Share", callback_data: "task:share" }]
-    ]
-  }
-}
-
-// ======================== SEND MESSAGE
-async function sendMessage(chatId, text, keyboard = null, markdown = false) {
-  const body = {
-    chat_id: chatId,
-    text,
-    parse_mode: markdown ? "Markdown" : "HTML",
-    reply_markup: keyboard
-  }
-
-  const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`
-  return await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body)
-  })
-        }
