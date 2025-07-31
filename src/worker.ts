@@ -1,162 +1,121 @@
-import { Router } from 'itty-router';
+import { Router } from 'itty-router'
 
-const router = Router();
+const router = Router()
 
-// ===== Helper =====
+// Waktu tunggu tugas (dalam detik)
+const WAIT_SECONDS = 10
 
+// Helper untuk ambil data JSON dari KV
 async function loadJSON(env, key) {
-  const val = await env.STORAGE.get(key);
-  return val ? JSON.parse(val) : key === 'tasks.json' ? [] : {};
+  const val = await env.STORAGE.get(key)
+  return val ? JSON.parse(val) : key.startsWith('task-') ? {} : []
 }
 
+// Helper untuk simpan data JSON ke KV
 async function saveJSON(env, key, data) {
-  await env.STORAGE.put(key, JSON.stringify(data));
+  await env.STORAGE.put(key, JSON.stringify(data))
 }
 
-async function sendTelegram(token, method, body) {
-  await fetch(`https://api.telegram.org/bot${token}/${method}`, {
+// ⛳ Webhook Handler
+router.post("/webhook", async (request, env) => {
+  const update = await request.json()
+  const msg = update.message
+  if (!msg || !msg.text) return new Response("OK")
+
+  const chatId = msg.chat.id
+  const text = msg.text.trim()
+  const userId = String(chatId)
+
+  // Load data user
+  let userStates = await loadJSON(env, 'user_states.json')
+  let user = userStates.find(u => u.id === userId)
+
+  if (!user) {
+    user = { id: userId, koin: 0, state: 'idle' }
+    userStates.push(user)
+    await saveJSON(env, 'user_states.json', userStates)
+  }
+
+  // Handle perintah
+  if (text === '/start') {
+    await sendMessage(env, chatId, `Selamat datang! Kamu punya ${user.koin} koin.`)
+    return new Response("OK")
+  }
+
+  if (text === '/koin') {
+    await sendMessage(env, chatId, `Saldo kamu: ${user.koin} koin`)
+    return new Response("OK")
+  }
+
+  if (text === '/tugas') {
+    // Cek apakah user sedang menunggu tugas
+    if (user.state === 'waiting') {
+      await sendMessage(env, chatId, `Kamu sedang menunggu tugas...`)
+      return new Response("OK")
+    }
+
+    // Buat tugas baru
+    user.state = 'waiting'
+    await saveJSON(env, 'user_states.json', userStates)
+
+    // Simulasikan penundaan tugas (nanti diganti real logic)
+    setTimeout(async () => {
+      const tugas = {
+        id: `tugas-${Date.now()}`,
+        userId: userId,
+        deskripsi: "Tugas klik tombol, nanti kamu dapat 1 koin",
+        waktu: new Date().toISOString()
+      }
+
+      await env.STORAGE.put(`task-${userId}`, JSON.stringify(tugas))
+
+      // Kirim tugas ke user
+      await sendMessage(env, chatId, `Tugas baru:\n${tugas.deskripsi}`)
+
+      // Reset status
+      user.state = 'idle'
+      await saveJSON(env, 'user_states.json', userStates)
+    }, WAIT_SECONDS * 1000)
+
+    await sendMessage(env, chatId, `Sedang mencari tugas... tunggu ${WAIT_SECONDS} detik.`)
+    return new Response("OK")
+  }
+
+  if (text === '/ambil') {
+    const tugas = await loadJSON(env, `task-${userId}`)
+
+    if (!tugas.id) {
+      await sendMessage(env, chatId, `Belum ada tugas untuk kamu.`)
+      return new Response("OK")
+    }
+
+    // Tambah koin
+    user.koin += 1
+    await env.STORAGE.delete(`task-${userId}`)
+    await saveJSON(env, 'user_states.json', userStates)
+
+    await sendMessage(env, chatId, `Tugas selesai! Kamu dapat 1 koin.\nTotal koin: ${user.koin}`)
+    return new Response("OK")
+  }
+
+  // Tidak dikenal
+  await sendMessage(env, chatId, `Perintah tidak dikenali.`)
+  return new Response("OK")
+})
+
+// Fungsi kirim pesan
+async function sendMessage(env, chatId, text) {
+  const url = `https://api.telegram.org/bot${env.TELEGRAM_TOKEN}/sendMessage`
+  await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
-  });
+    body: JSON.stringify({ chat_id: chatId, text })
+  })
 }
 
-// ===== Webhook Handler =====
-
-router.post('/webhook', async (req, env) => {
-  const { message } = await req.json();
-  if (!message) return new Response('No message');
-
-  const userId = message.from.id;
-  const text = message.text?.trim();
-  if (!text) return new Response('No text');
-
-  // Ambil data dari KV
-  const users = await loadJSON(env, 'users.json');
-  const tasks = await loadJSON(env, 'tasks.json');
-
-  // Inisialisasi user
-  if (!users[userId]) users[userId] = { coin: 10 };
-
-  // Perintah
-  if (text.startsWith('/buat_tugas')) {
-    users[userId].state = 'awaiting_type';
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: '📝 Kirim tipe tugas (contoh: subscribe, join, follow)',
-    });
-  }
-
-  else if (users[userId].state === 'awaiting_type') {
-    users[userId].temp = { type: text };
-    users[userId].state = 'awaiting_url';
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: '🔗 Kirim URL tujuan tugas (contoh: https://t.me/xxx)',
-    });
-  }
-
-  else if (users[userId].state === 'awaiting_url') {
-    users[userId].temp.url = text;
-    users[userId].state = 'awaiting_reward';
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: '💰 Kirim reward tugas (jumlah koin)',
-    });
-  }
-
-  else if (users[userId].state === 'awaiting_reward') {
-    const reward = parseInt(text);
-    if (isNaN(reward) || reward <= 0)
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: '❌ Masukkan angka koin yang valid.',
-      });
-
-    if (users[userId].coin < reward)
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: '❌ Koin kamu tidak cukup untuk membuat tugas ini.',
-      });
-
-    // Buat tugas
-    const task = {
-      id: `task-${Date.now()}`,
-      user_id: userId,
-      reward,
-      info: users[userId].temp
-    };
-
-    tasks.push(task);
-    users[userId].coin -= reward;
-    users[userId].state = null;
-    users[userId].temp = null;
-
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: `✅ Tugas berhasil dibuat!\n\nType: ${task.info.type}\nURL: ${task.info.url}\nReward: ${reward} koin`
-    });
-  }
-
-  else if (text === '/tugas') {
-    const availableTasks = tasks.filter(t => t.user_id !== userId);
-    if (availableTasks.length === 0)
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: '📭 Belum ada tugas tersedia.',
-      });
-
-    const tampil = availableTasks.map(t =>
-      `🔹 <b>Type:</b> ${t.info.type}\n🔗 <b>URL:</b> ${t.info.url}\n💰 <b>Reward:</b> ${t.reward} koin\n/task_${t.id}`
-    ).join('\n\n');
-
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: `📋 Daftar Tugas:\n\n${tampil}`,
-      parse_mode: 'HTML'
-    });
-  }
-
-  else if (text.startsWith('/task_task-')) {
-    const taskId = text.slice(6);
-    const taskIndex = tasks.findIndex(t => t.id === taskId);
-
-    if (taskIndex === -1)
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: '❌ Tugas sudah diambil atau tidak ditemukan.',
-      });
-
-    const task = tasks[taskIndex];
-    if (task.user_id === userId)
-      return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-        chat_id: userId,
-        text: '❌ Kamu tidak bisa mengambil tugas buatan sendiri.',
-      });
-
-    users[userId].coin += task.reward;
-    tasks.splice(taskIndex, 1); // hapus tugas
-
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: `✅ Tugas selesai! Kamu dapat ${task.reward} koin.\n\nURL: ${task.info.url}`
-    });
-  }
-
-  else if (text === '/coin') {
-    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-      chat_id: userId,
-      text: `💰 Koin kamu saat ini: ${users[userId].coin} koin`
-    });
-  }
-
-  // Simpan kembali semua data
-  await saveJSON(env, 'users.json', users);
-  await saveJSON(env, 'tasks.json', tasks);
-
-  return new Response('OK');
-});
+// ⛳ Default router fallback
+router.all("*", () => new Response("404 Not Found", { status: 404 }))
 
 export default {
-  fetch: router.handle
-};
+  fetch: (req, env, ctx) => router.handle(req, env, ctx),
+      }
