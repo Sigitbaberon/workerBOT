@@ -3,12 +3,6 @@
   "version": "1.0.0",
   "type": "module",
   "dependencies": {
-    "itty-router": "^4.0.0"
-  },
-  
-  "dependencies": {
     "hono": "^4.3.0"
   }
 }
-
-
