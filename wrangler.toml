@@ -1,11 +1,11 @@
 name = "ragnet-tools"
-main = "worker.ts"
+main = "index.js"
+type = "javascript"
 compatibility_date = "2025-07-31"
-
-kv_namespaces = [
-  { binding = "USER_DB", id = "236d68b5c6964ee79fc7f0afbda2340e" },
-  { binding = "TASK_DB", id = "236d68b5c6964ee79fc7f0afbda2340e" }
-]
 
 [vars]
 BOT_TOKEN = "8197335440:AAEY93jyo1P94iJ0rx2xPNb20c6H60BWjvg"
+
+[[kv_namespaces]]
+binding = "USERS"
+id = "ISI_ID_NAMESPACE_KAMU"
