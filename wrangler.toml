@@ -1,6 +1,5 @@
 name = "ragnet-tools"
 main = "index.js"
-type = "javascript"
 compatibility_date = "2025-07-31"
 
 [vars]
