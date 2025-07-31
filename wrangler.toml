@@ -5,8 +5,6 @@ compatibility_date = "2024-07-31"
 [vars]
 BOT_TOKEN = "8197335440:AAEY93jyo1P94iJ0rx2xPNb20c6H60BWjvg"
 
-[build]
-command = "npm install && npx wrangler deploy"
 
 [[kv_namespaces]]
 binding = "STORAGE"
