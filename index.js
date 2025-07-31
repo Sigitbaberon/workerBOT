@@ -11,33 +11,38 @@ const taskTypes = {
 
 async function handleRequest(request) {
   if (request.method !== "POST") return new Response("OK")
-
   const update = await request.json()
 
   if (update.message) {
-    const chatId = update.message.chat.id
+    const msg = update.message
+    const chatId = msg.chat.id
     const userId = String(chatId)
-    const text = update.message.text.toLowerCase()
+    const text = msg.text?.toLowerCase()?.trim() || ""
 
     let user = await USERS.get(userId, { type: 'json' }) || { coins: 10, tasks: [] }
 
-    // Jika kirim link tugas
+    // Menu /start
+    if (text === "/start") {
+      await USERS.put(userId, JSON.stringify(user))
+      return sendMessage(chatId,
+        `👋 Selamat datang di *Ragnet Tools*!\n\n🔁 Sistem tugas like/follow/share Facebook\n💰 Dapatkan koin dari menyelesaikan tugas.\n\nPilih menu:`,
+        mainKeyboard())
+    }
+
+    // Kirim link Facebook
     if (text.startsWith("http")) {
+      if (!/^https?:\/\/(www\.)?facebook\.com/.test(text)) {
+        return sendMessage(chatId, `⛔ Link harus dari Facebook.`)
+      }
+
       user.lastLink = text
       await USERS.put(userId, JSON.stringify(user))
       return sendMessage(chatId, `📌 Link tersimpan.\nPilih jenis tugas:`, typeKeyboard())
     }
 
-    // Menu awal
-    if (text === "/start") {
-      await USERS.put(userId, JSON.stringify(user))
-      return sendMessage(chatId, `👋 Selamat datang di *Ragnet Tools*!\n\n🔁 Sistem tugas like/follow/share Facebook\n💰 Kamu dapat koin dari menyelesaikan tugas.\n\nPilih menu:`, mainKeyboard())
-    }
-
     return sendMessage(chatId, `🤖 Silakan gunakan tombol di bawah.`, mainKeyboard())
   }
 
-  // Callback tombol ditekan
   if (update.callback_query) {
     const data = update.callback_query.data
     const chatId = update.callback_query.message.chat.id
@@ -45,11 +50,13 @@ async function handleRequest(request) {
     let user = await USERS.get(userId, { type: 'json' }) || { coins: 10, tasks: [] }
 
     if (data === "profile") {
-      return sendMessage(chatId, `🧑‍💼 ID: ${chatId}\n💰 Koin: ${user.coins}`, mainKeyboard())
+      return sendMessage(chatId,
+        `🧑‍💼 ID: ${chatId}\n💰 Koin: ${user.coins}\n📝 Total Tugas: ${user.tasks.length}`,
+        mainKeyboard())
     }
 
     if (data === "buat") {
-      return sendMessage(chatId, `🔗 Kirimkan link Facebook kamu dulu.\nSetelah itu kamu akan pilih jenis tugas.`)
+      return sendMessage(chatId, `🔗 Kirimkan link Facebook kamu dulu.\nSetelah itu pilih jenis tugas.`)
     }
 
     if (data === "ambil") {
@@ -59,37 +66,60 @@ async function handleRequest(request) {
       for (const key of users.keys) {
         const u = await USERS.get(key.name, { type: "json" })
         if (u?.tasks?.length > 0) {
-          tugas.push(...u.tasks.map(t => `✅ ${t.type.toUpperCase()} - [Klik Tugas](${t.url}) → 🎁 +${t.reward} koin`))
+          tugas.push(...u.tasks.map(t =>
+            `✅ ${t.type.toUpperCase()} - [Klik Tugas](${t.url}) → 🎁 +${t.reward} koin`
+          ))
         }
       }
 
-      return sendMessage(chatId, tugas.length ? tugas.join('\n\n') : '📭 Belum ada tugas.', mainKeyboard(), true)
+      return sendMessage(chatId,
+        tugas.length ? tugas.join('\n\n') : '📭 Belum ada tugas.',
+        mainKeyboard(), true)
     }
 
-    // Saat user pilih jenis tugas
     if (data.startsWith("task:")) {
       const type = data.split(":")[1]
-      const link = user.lastLink
       const setting = taskTypes[type]
+      const link = user.lastLink
 
-      if (!link) return sendMessage(chatId, `⛔ Kirim link Facebook dulu.`)
+      if (!setting) return sendMessage(chatId, "⛔ Jenis tugas tidak dikenal.")
+      if (!link) return sendMessage(chatId, "📎 Kirimkan link Facebook dulu.")
+      if (user.coins < setting.cost) {
+        return sendMessage(chatId,
+          `❌ Koin kamu tidak cukup.\n💰 Perlu ${setting.cost}, kamu punya ${user.coins}`)
+      }
 
-      if (user.coins < setting.cost)
-        return sendMessage(chatId, `❌ Koin kamu tidak cukup.\n💰 Perlu ${setting.cost}, kamu punya ${user.coins}`)
+      // Cegah duplikat
+      if (user.tasks.find(t => t.url === link && t.type === type)) {
+        return sendMessage(chatId, "⚠️ Tugas ini sudah pernah kamu buat.")
+      }
 
-      // Simpan tugas dan potong koin
-      user.tasks.push({ type, url: link, reward: setting.reward })
+      // Maks 10 tugas
+      if (user.tasks.length >= 10) {
+        return sendMessage(chatId, "🚫 Maksimal 10 tugas aktif per pengguna.")
+      }
+
+      // Simpan tugas
+      user.tasks.push({
+        id: crypto.randomUUID(),
+        type,
+        url: link,
+        reward: setting.reward
+      })
       user.coins -= setting.cost
       delete user.lastLink
       await USERS.put(userId, JSON.stringify(user))
 
-      return sendMessage(chatId, `✅ Tugas berhasil dibuat!\n🔗 ${type.toUpperCase()} → ${link}\n💸 -${setting.cost} koin`, mainKeyboard())
+      return sendMessage(chatId,
+        `✅ Tugas berhasil dibuat!\n🔗 ${type.toUpperCase()} → ${link}\n💸 -${setting.cost} koin`,
+        mainKeyboard())
     }
   }
 
   return new Response("OK")
 }
 
+// ======================== UI
 function mainKeyboard() {
   return {
     inline_keyboard: [
@@ -111,10 +141,11 @@ function typeKeyboard() {
   }
 }
 
+// ======================== SEND MESSAGE
 async function sendMessage(chatId, text, keyboard = null, markdown = false) {
   const body = {
     chat_id: chatId,
-    text: text,
+    text,
     parse_mode: markdown ? "Markdown" : "HTML",
     reply_markup: keyboard
   }
@@ -125,4 +156,4 @@ async function sendMessage(chatId, text, keyboard = null, markdown = false) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)
   })
-      }
+        }
