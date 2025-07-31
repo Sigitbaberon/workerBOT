@@ -40,12 +40,16 @@ if (text === '/start' || text === 'menu') { await sendTelegram(env.BOT_TOKEN, 's
 
 if (!task) {
   return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-    chat_id: userId, text: '❌ Tugas tidak ditemukan.' });
+    chat_id: userId,
+    text: '❌ Tugas tidak ditemukan.'
+  });
 }
 
 if (task.done_by.includes(userId)) {
   return await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
-    chat_id: userId, text: '⚠️ Tugas ini sudah kamu klaim.' });
+    chat_id: userId,
+    text: '⚠️ Tugas ini sudah kamu klaim.'
+  });
 }
 
 if (!visitData.visited || now - visitData.visited < WAIT_SECONDS * 1000) {
@@ -68,7 +72,7 @@ await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
 
 Kamu mendapat ${task.reward} coin.`, parse_mode: 'Markdown', reply_markup: { inline_keyboard: [[{ text: '🔄 Menu', callback_data: 'menu' }]] }, });
 
-} else if (text === 'buat_tugas_1') { await sendTelegram(env.BOT_TOKEN, 'sendMessage', { chat_id: userId, text: '📌 Pilih jenis tugas:', reply_markup: { inline_keyboard: [ [{ text: '👍 Like', callback_data: 'buat_tugas_2_like' }, { text: '🔗 Visit', callback_data: 'buat_tugas_2_visit' }], [{ text: '🔄 Menu', callback_data: 'menu' }], ], }, });
+} else if (text === 'buat_tugas_1') { await sendTelegram(env.BOT_TOKEN, 'sendMessage', { chat_id: userId, text: '📌 Pilih jenis tugas:', reply_markup: { inline_keyboard: [ [ { text: '👍 Like', callback_data: 'buat_tugas_2_like' }, { text: '🔗 Visit', callback_data: 'buat_tugas_2_visit' } ], [{ text: '🔄 Menu', callback_data: 'menu' }], ], }, });
 
 } else if (text.startsWith('buat_tugas_2_')) { const type = text.split('_')[3]; states[userId] = { step: 'input_link', type }; await saveJSON(env, 'user_states.json', states); await sendTelegram(env.BOT_TOKEN, 'sendMessage', { chat_id: userId, text: '🔗 Kirim link target tugas ini:', });
 
@@ -97,4 +101,4 @@ router.all('*', () => new Response('Not Found', { status: 404 }));
 
 export default { fetch: router.handle };
 
-                                           
+                                                                                                                                                                                                                                                                                                                                                                        
