@@ -1,0 +1,4 @@
+name = "ragnet-tools-bot"
+main = "src/worker.js"
+compatibility_date = "2025-07-31"
+workers_dev = true
