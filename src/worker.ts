@@ -36,6 +36,17 @@ function isValidURL(url) {
   }
 }
 
+function mainMenu() {
+  return {
+    inline_keyboard: [
+      [{ text: '📋 Lihat Tugas', callback_data: 'daftar_tugas' }],
+      [{ text: '➕ Buat Tugas', callback_data: 'buat_tugas' }],
+      [{ text: '💰 Cek Coin', callback_data: 'cek_coin' }],
+      [{ text: 'ℹ️ Bantuan', callback_data: 'bantuan' }],
+    ],
+  };
+}
+
 router.post('/webhook', async (request, env) => {
   let body;
   try {
@@ -59,19 +70,14 @@ router.post('/webhook', async (request, env) => {
     await saveJSON(env, 'users.json', users);
   }
 
+  // ==== /START ====
   if (text === '/start') {
     await showTyping(env.BOT_TOKEN, userId);
     await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
       chat_id: userId,
-      text: `👋 Selamat datang *${msg.from.first_name}*!\n\nGunakan tombol-tombol di bawah ini untuk mulai.`,
+      text: `👋 Selamat datang *${msg.from.first_name}*!\n\nGunakan menu di bawah untuk memulai:`,
       parse_mode: 'Markdown',
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '📋 Lihat Tugas', callback_data: 'daftar_tugas' }],
-          [{ text: '💰 Cek Coin', callback_data: 'cek_coin' }],
-          [{ text: 'ℹ️ Bantuan', callback_data: 'bantuan' }],
-        ],
-      },
+      reply_markup: mainMenu(),
     });
     return new Response('OK');
   }
@@ -83,6 +89,7 @@ router.post('/webhook', async (request, env) => {
       chat_id: userId,
       text: `💰 Coin kamu saat ini: *${users[userId].coin}*`,
       parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '🔄 Kembali ke Menu', callback_data: '/start' }]] },
     });
 
   // ==== LIHAT TUGAS ====
@@ -93,18 +100,21 @@ router.post('/webhook', async (request, env) => {
       await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
         chat_id: userId,
         text: '📭 Tidak ada tugas yang tersedia untuk kamu saat ini.',
+        reply_markup: { inline_keyboard: [[{ text: '🔄 Kembali ke Menu', callback_data: '/start' }]] },
       });
     } else {
       for (const task of available) {
         await saveJSON(env, `task-${task.id}-${userId}`, { visited: Date.now() });
+        const emoji = task.type === 'like' ? '👍' : '🔗';
         await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
           chat_id: userId,
-          text: `📌 *Tugas Baru*\n\n🆔 ID: \`${task.id}\`\n🎯 Link: [Klik Disini](${task.target})\n💰 Reward: *${task.reward} coin*`,
+          text: `📌 *Tugas Baru*\n\n🆔 ID: \`${task.id}\`\n${emoji} Jenis: *${task.type.toUpperCase()}*\n🎯 Link: [Klik Disini](${task.target})\n💰 Reward: *${task.reward} coin*`,
           parse_mode: 'Markdown',
           reply_markup: {
             inline_keyboard: [
-              [{ text: '🔗 Kunjungi Tugas', url: task.target }],
+              [{ text: `${emoji} Buka Link`, url: task.target }],
               [{ text: '✅ Saya sudah kunjungi', callback_data: `klaim_${task.id}` }],
+              [{ text: '🔄 Kembali ke Menu', callback_data: '/start' }],
             ],
           },
         });
@@ -153,9 +163,19 @@ router.post('/webhook', async (request, env) => {
       chat_id: userId,
       text: `🎉 *Klaim berhasil!*\nKamu mendapatkan *${task.reward} coin*.`,
       parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '🔄 Kembali ke Menu', callback_data: '/start' }]] },
     });
 
-  // ==== BUAT TUGAS ====
+  // ==== BANTUAN ====
+  } else if (text === 'bantuan') {
+    await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
+      chat_id: userId,
+      text: `🆘 *Bantuan Bot*\n\n📌 Gunakan menu utama untuk interaksi.\n\n➕ *Buat Tugas*: Klik tombol ➕ Buat Tugas\nGunakan format:\n\`/buat_tugas like https://link 5\`\n\n🎯 Jenis tugas: \`like\` atau \`visit\`\n💰 Coin akan dikurangi sesuai reward tugas.\n`,
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '🔄 Kembali ke Menu', callback_data: '/start' }]] },
+    });
+
+  // ==== BUAT TUGAS VIA PERINTAH ====
   } else if (text.startsWith('/buat_tugas')) {
     const parts = text.split(' ');
     if (parts.length < 4) {
@@ -210,20 +230,22 @@ router.post('/webhook', async (request, env) => {
       chat_id: userId,
       text: `✅ *Tugas berhasil dibuat!*\n\n🆔 ID: \`${id}\`\n🎯 Link: ${url}\n💰 Reward: ${reward} coin`,
       parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '🔄 Kembali ke Menu', callback_data: '/start' }]] },
     });
 
-  // ==== BANTUAN ====
-  } else if (text === 'bantuan') {
+  // ==== TOMBOL BUAT TUGAS TANPA TEKS ====
+  } else if (text === 'buat_tugas') {
     await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
       chat_id: userId,
-      text: `🆘 *Bantuan Bot*\n\nPerintah:\n/start - Tampilkan menu\n/cek_coin - Lihat saldo coin\n/buat_tugas like <url> <coin> - Buat tugas`,
+      text: `🛠️ *Buat Tugas Manual*\n\nGunakan perintah seperti:\n\`/buat_tugas like https://linkmu 5\`\n\nJenis: \`like\` atau \`visit\`\nReward: coin minimal 1`,
       parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '🔄 Kembali ke Menu', callback_data: '/start' }]] },
     });
 
   } else {
     await sendTelegram(env.BOT_TOKEN, 'sendMessage', {
       chat_id: userId,
-      text: '🤖 Perintah tidak dikenali. Gunakan /start untuk membuka menu.',
+      text: '🤖 Perintah tidak dikenali. Gunakan tombol /start atau klik menu.',
     });
   }
 
