@@ -1,15 +1,17 @@
 import { Hono } from 'hono'
-import { Telegram } from 'grammy'
-import { handleUpdate } from 'grammy/web'
-import { Env } from './types'
+import { Bot } from 'grammy'
+import type { Context } from 'grammy'
+import type { Env } from './types'
 
 const app = new Hono<{ Bindings: Env }>()
 
-const bot = new Telegram<Env>((env) => env.BOT_TOKEN)
+const bot = new Bot<Context>(process.env.BOT_TOKEN || '')
 
+// 🛠️ HANDLE WEBHOOK
 app.post('/webhook', async (c) => {
   const update = await c.req.json()
-  return await handleUpdate(bot, update, c)
+  await bot.handleUpdate(update)
+  return c.text('OK')
 })
 
 // 🚀 START command
@@ -61,7 +63,7 @@ bot.callbackQuery('lihat_tugas', async (ctx) => {
         inline_keyboard: [
           [{ text: '✅ Kerjakan', callback_data: `kerjakan_${task.id}` }]
         ]
-      }
+      ]
     })
   }
 
@@ -92,7 +94,7 @@ bot.callbackQuery(/kerjakan_(.+)/, async (ctx) => {
   await ctx.answerCallbackQuery()
 })
 
-// ➕ BUAT TUGAS (tombol trigger saja, bisa lanjutkan ke wizard kalau kamu ingin full UI)
+// ➕ BUAT TUGAS (trigger awal)
 bot.callbackQuery('buat_tugas', async (ctx) => {
   await ctx.reply('✍️ Kirim format tugas seperti ini:\n`like https://link.com 2`', {
     parse_mode: 'Markdown'
@@ -100,7 +102,7 @@ bot.callbackQuery('buat_tugas', async (ctx) => {
   await ctx.answerCallbackQuery()
 })
 
-// HANDLE FORMAT BUAT TUGAS
+// HANDLE PESAN FORMAT BUAT TUGAS
 bot.on('message:text', async (ctx) => {
   const id = ctx.from.id.toString()
   const users = await loadJSON(ctx.env, 'users.json')
@@ -128,7 +130,7 @@ bot.on('message:text', async (ctx) => {
   })
 })
 
-// UTILITY
+// UTILITY FUNCTIONS
 async function loadJSON(env: Env, key: string) {
   const val = await env.STORAGE.get(key)
   return val ? JSON.parse(val) : []
