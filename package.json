@@ -6,10 +6,10 @@
     "dev": "wrangler dev",
     "build": "wrangler deploy"
   },
-  "dependencies": {
-    "hono": "^3.11.5",
-    "grammy": "^1.19.1"
-  },
+"dependencies": {
+  "grammy": "1.19.1",
+  "hono": "^3.11.5"
+},
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20230712.0",
     "typescript": "^5.4.0"
