@@ -1,100 +1,103 @@
 addEventListener("fetch", event => {
-  event.respondWith(handleRequest(event.request));
-});
+  event.respondWith(handleRequest(event.request))
+})
 
-const users = {};
-const tasks = [];
-const taskHistory = [];
-const dailyClaim = {};
+const users = new Map()
+const tasks = []
 
 async function handleRequest(request) {
-  const url = new URL(request.url);
-  const params = url.searchParams;
-  const userId = params.get("user_id");
-  const action = params.get("action");
+  const { searchParams } = new URL(request.url)
+  const userId = searchParams.get("user") || "anonymous"
 
-  if (!users[userId]) {
-    users[userId] = { koin: 100, selesai: 0, level: 1, referral: [], rank: 0 };
+  const text = searchParams.get("text") || ""
+
+  // Inisialisasi user jika belum ada
+  if (!users.has(userId)) {
+    users.set(userId, {
+      coins: 10,
+      tasks: [],
+    })
   }
 
-  if (action === "add_task") {
-    const taskLink = params.get("link");
-    const koinDipotong = parseInt(params.get("koin")) || 10;
-    if (users[userId].koin >= koinDipotong) {
-      tasks.push({ id: tasks.length, pemilik: userId, link: taskLink, koin: koinDipotong });
-      users[userId].koin -= koinDipotong;
-      return new Response("Tugas berhasil ditambahkan");
-    } else {
-      return new Response("Koin tidak cukup");
+  if (text === "/start") {
+    return responseWithMenu(userId)
+  }
+
+  // Fungsi tombol-tombol
+  if (text === "👤 Profile") {
+    return new Response(`🧾 Profile:
+👤 ID: ${userId}
+💰 Koin: ${users.get(userId).coins}
+📦 Tugas: ${users.get(userId).tasks.length}`, { status: 200 })
+  }
+
+  if (text === "📝 Buat Tugas") {
+    return new Response(`Silakan kirim link konten yang ingin kamu promosikan dengan format:
+buat:<link>,<jumlah>`, { status: 200 })
+  }
+
+  if (text.startsWith("buat:")) {
+    const [, data] = text.split("buat:")
+    const [link, jumlah] = data.split(",")
+    const jumlahInt = parseInt(jumlah)
+    const user = users.get(userId)
+
+    if (user.coins < jumlahInt) {
+      return new Response("❌ Koin kamu tidak cukup untuk membuat tugas ini.", { status: 200 })
     }
-  }
 
-  if (action === "kerjakan") {
-    const taskId = parseInt(params.get("id"));
-    const task = tasks.find(t => t.id === taskId && t.pemilik !== userId);
-    if (task) {
-      users[userId].koin += task.koin;
-      users[userId].selesai += 1;
-      users[task.pemilik].koin += 1; // reward pemilik karena tugas selesai
-      taskHistory.push({ taskId, oleh: userId, waktu: Date.now() });
-      tasks.splice(tasks.indexOf(task), 1);
-      return new Response("Tugas selesai, koin bertambah");
+    // Simpan tugas
+    const task = {
+      id: tasks.length + 1,
+      owner: userId,
+      link,
+      jumlah: jumlahInt,
+      done: 0,
     }
-    return new Response("Tugas tidak ditemukan atau milik sendiri");
+
+    tasks.push(task)
+    user.tasks.push(task)
+    user.coins -= jumlahInt
+
+    return new Response(`✅ Tugas berhasil dibuat.
+🔗 Link: ${link}
+🎯 Target: ${jumlahInt}
+💰 Sisa Koin: ${user.coins}`, { status: 200 })
   }
 
-  if (action === "statistik") {
-    const u = users[userId];
-    return new Response(`📊 Statistik Anda:\n\nKoin: ${u.koin}\nTugas Diselesaikan: ${u.selesai}\nLevel: ${u.level}`);
+  if (text === "📋 Tugas Saya") {
+    const user = users.get(userId)
+    if (user.tasks.length === 0) return new Response("Kamu belum membuat tugas apapun.", { status: 200 })
+
+    let list = user.tasks.map(t => `#${t.id} - ${t.link} (${t.done}/${t.jumlah})`).join("\n")
+    return new Response(`🧾 Tugas Kamu:\n${list}`, { status: 200 })
   }
 
-  if (action === "leaderboard") {
-    const ranking = Object.entries(users)
-      .sort(([, a], [, b]) => b.koin - a.koin)
-      .slice(0, 10)
-      .map(([id, u], i) => `${i + 1}. ${id} - ${u.koin} koin`)
-      .join("\n");
-    return new Response(`🏆 Peringkat:\n\n${ranking}`);
+  if (text === "🚀 Kerjakan Tugas") {
+    const available = tasks.filter(t => t.owner !== userId && t.done < t.jumlah)
+    if (available.length === 0) return new Response("Tidak ada tugas tersedia saat ini.", { status: 200 })
+
+    const task = available[0]
+    task.done += 1
+    users.get(userId).coins += 1
+
+    return new Response(`✅ Selesaikan tugas ini:\n🔗 ${task.link}\n\n💰 Kamu dapat 1 koin.\nTotal koin kamu: ${users.get(userId).coins}`, { status: 200 })
   }
 
-  if (action === "daily") {
-    const now = Date.now();
-    const last = dailyClaim[userId] || 0;
-    if (now - last >= 86400000) {
-      users[userId].koin += 20;
-      dailyClaim[userId] = now;
-      return new Response("🎁 Bonus harian klaim berhasil +20 koin");
-    }
-    return new Response("Sudah klaim hari ini, coba besok");
-  }
+  return responseWithMenu(userId)
+}
 
-  if (action === "referral") {
-    const ref = params.get("ref");
-    if (ref && ref !== userId && users[ref]) {
-      if (!users[ref].referral.includes(userId)) {
-        users[ref].referral.push(userId);
-        users[ref].koin += 15;
-        return new Response("Referral berhasil, user yang direferensi mendapat bonus");
-      }
-    }
-    return new Response("Referral gagal");
-  }
+// Fungsi menampilkan tombol-tombol utama
+function responseWithMenu(userId) {
+  const body = `🎯 Selamat datang di Ragnet Tools Bot!
 
-  // Daftar tombol utama
-  const menu = `
-Selamat datang 👋
+Silakan pilih menu:
+- 👤 Profile
+- 📝 Buat Tugas
+- 📋 Tugas Saya
+- 🚀 Kerjakan Tugas
 
-💰 Koin Anda: ${users[userId].koin}
-🛠 Tugas tersedia: ${tasks.length}
+Koin kamu: ${users.get(userId).coins}`
 
-🔘 Menu:
-- Tambah Tugas: /?action=add_task&user_id=${userId}&link=LINK&koin=10
-- Kerjakan Tugas: /?action=kerjakan&user_id=${userId}&id=TASKID
-- Statistik: /?action=statistik&user_id=${userId}
-- Ranking: /?action=leaderboard&user_id=${userId}
-- Bonus Harian: /?action=daily&user_id=${userId}
-- Referral: /?action=referral&user_id=${userId}&ref=ID_REF
-`;
-
-  return new Response(menu);
+  return new Response(body, { status: 200 })
 }
