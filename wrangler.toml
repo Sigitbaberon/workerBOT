@@ -1,4 +1,4 @@
-name = "fb-coin-bot"
+name = "worketbot"
 main = "src/worker.ts"
 compatibility_date = "2024-07-31"
 
