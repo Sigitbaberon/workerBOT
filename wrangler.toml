@@ -1,4 +1,4 @@
-name = "injector-worker"
+name = "workerbot"
 main = "src/index.js"
 compatibility_date = "2025-07-31"
 workers_dev = true
